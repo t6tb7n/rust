@@ -652,6 +652,8 @@ pub enum CallSource {
     /// Other types of desugaring that did not come from the HIR, but we don't care about
     /// for diagnostics (yet).
     Misc,
+    /// Use of value, generating a clone function call
+    Use,
     /// Normal function call, no special source
     Normal,
 }
@@ -929,6 +931,8 @@ pub enum TerminatorKind<'tcx> {
         asm_macro: InlineAsmMacro,
 
         /// The template for the inline assembly, with placeholders.
+        #[type_foldable(identity)]
+        #[type_visitable(ignore)]
         template: &'tcx [InlineAsmTemplatePiece],
 
         /// The operands for the inline assembly, as `Operand`s or `Place`s.
@@ -939,6 +943,8 @@ pub enum TerminatorKind<'tcx> {
 
         /// Source spans for each line of the inline assembly code. These are
         /// used to map assembler errors back to the line in the source code.
+        #[type_foldable(identity)]
+        #[type_visitable(ignore)]
         line_spans: &'tcx [Span],
 
         /// Valid targets for the inline assembly.
@@ -1236,6 +1242,8 @@ pub enum ProjectionElem<V, T> {
 
     /// Like an explicit cast from an opaque type to a concrete type, but without
     /// requiring an intermediate variable.
+    ///
+    /// This is unused with `-Znext-solver`.
     OpaqueCast(T),
 
     /// A transmute from an unsafe binder to the type that it wraps. This is a projection
@@ -1666,6 +1674,42 @@ pub enum BinOp {
     Cmp,
     /// The `ptr.offset` operator
     Offset,
+}
+
+// Assignment operators, e.g. `+=`. See comments on the corresponding variants
+// in `BinOp` for details.
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash, HashStable)]
+pub enum AssignOp {
+    AddAssign,
+    SubAssign,
+    MulAssign,
+    DivAssign,
+    RemAssign,
+    BitXorAssign,
+    BitAndAssign,
+    BitOrAssign,
+    ShlAssign,
+    ShrAssign,
+}
+
+// Sometimes `BinOp` and `AssignOp` need the same treatment. The operations
+// covered by `AssignOp` are a subset of those covered by `BinOp`, so it makes
+// sense to convert `AssignOp` to `BinOp`.
+impl From<AssignOp> for BinOp {
+    fn from(op: AssignOp) -> BinOp {
+        match op {
+            AssignOp::AddAssign => BinOp::Add,
+            AssignOp::SubAssign => BinOp::Sub,
+            AssignOp::MulAssign => BinOp::Mul,
+            AssignOp::DivAssign => BinOp::Div,
+            AssignOp::RemAssign => BinOp::Rem,
+            AssignOp::BitXorAssign => BinOp::BitXor,
+            AssignOp::BitAndAssign => BinOp::BitAnd,
+            AssignOp::BitOrAssign => BinOp::BitOr,
+            AssignOp::ShlAssign => BinOp::Shl,
+            AssignOp::ShrAssign => BinOp::Shr,
+        }
+    }
 }
 
 // Some nodes are used a lot. Make sure they don't unintentionally get bigger.

@@ -230,6 +230,7 @@ impl<'a> ExtCtxt<'a> {
             self.pat_ident(sp, ident)
         };
         let local = P(ast::Local {
+            super_: None,
             pat,
             ty,
             id: ast::DUMMY_NODE_ID,
@@ -245,6 +246,7 @@ impl<'a> ExtCtxt<'a> {
     /// Generates `let _: Type;`, which is usually used for type assertions.
     pub fn stmt_let_type_only(&self, span: Span, ty: P<ast::Ty>) -> ast::Stmt {
         let local = P(ast::Local {
+            super_: None,
             pat: self.pat_wild(span),
             ty: Some(ty),
             id: ast::DUMMY_NODE_ID,
@@ -662,15 +664,8 @@ impl<'a> ExtCtxt<'a> {
         P(ast::FnDecl { inputs, output })
     }
 
-    pub fn item(
-        &self,
-        span: Span,
-        name: Ident,
-        attrs: ast::AttrVec,
-        kind: ast::ItemKind,
-    ) -> P<ast::Item> {
+    pub fn item(&self, span: Span, attrs: ast::AttrVec, kind: ast::ItemKind) -> P<ast::Item> {
         P(ast::Item {
-            ident: name,
             attrs,
             id: ast::DUMMY_NODE_ID,
             kind,
@@ -687,17 +682,17 @@ impl<'a> ExtCtxt<'a> {
     pub fn item_static(
         &self,
         span: Span,
-        name: Ident,
+        ident: Ident,
         ty: P<ast::Ty>,
         mutability: ast::Mutability,
         expr: P<ast::Expr>,
     ) -> P<ast::Item> {
         self.item(
             span,
-            name,
             AttrVec::new(),
             ast::ItemKind::Static(
                 ast::StaticItem {
+                    ident,
                     ty,
                     safety: ast::Safety::Default,
                     mutability,
@@ -712,18 +707,18 @@ impl<'a> ExtCtxt<'a> {
     pub fn item_const(
         &self,
         span: Span,
-        name: Ident,
+        ident: Ident,
         ty: P<ast::Ty>,
         expr: P<ast::Expr>,
     ) -> P<ast::Item> {
         let defaultness = ast::Defaultness::Final;
         self.item(
             span,
-            name,
             AttrVec::new(),
             ast::ItemKind::Const(
                 ast::ConstItem {
                     defaultness,
+                    ident,
                     // FIXME(generic_const_items): Pass the generics as a parameter.
                     generics: ast::Generics::default(),
                     ty,

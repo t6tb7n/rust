@@ -37,7 +37,7 @@ pub(crate) fn check_legal_trait_for_method_call(
     body_id: DefId,
 ) -> Result<(), ErrorGuaranteed> {
     if tcx.is_lang_item(trait_id, LangItem::Drop)
-        && tcx.lang_items().fallback_surface_drop_fn() != Some(body_id)
+        && !tcx.is_lang_item(body_id, LangItem::FallbackSurfaceDrop)
     {
         let sugg = if let Some(receiver) = receiver.filter(|s| !s.is_empty()) {
             errors::ExplicitDestructorCallSugg::Snippet {
@@ -771,7 +771,7 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
                     format!("this {descr} returns an unsized value `{output_ty}`, so it cannot be called")
                 );
                 if let DefIdOrName::DefId(def_id) = maybe_def
-                    && let Some(def_span) = self.tcx.hir().span_if_local(def_id)
+                    && let Some(def_span) = self.tcx.hir_span_if_local(def_id)
                 {
                     err.span_label(def_span, "the callable type is defined here");
                 }
@@ -780,7 +780,7 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
             }
         }
 
-        if let Some(span) = self.tcx.hir().res_span(def) {
+        if let Some(span) = self.tcx.hir_res_span(def) {
             let callee_ty = callee_ty.to_string();
             let label = match (unit_variant, inner_callee_path) {
                 (Some((_, kind, path)), _) => {

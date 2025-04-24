@@ -74,14 +74,16 @@ impl<'hir> LoweringContext<'_, 'hir> {
                     // Merge attributes into the inner expression.
                     if !e.attrs.is_empty() {
                         let old_attrs = self.attrs.get(&ex.hir_id.local_id).copied().unwrap_or(&[]);
-                        self.attrs.insert(
-                            ex.hir_id.local_id,
-                            &*self.arena.alloc_from_iter(
-                                self.lower_attrs_vec(&e.attrs, e.span)
-                                    .into_iter()
-                                    .chain(old_attrs.iter().cloned()),
-                            ),
+                        let attrs = &*self.arena.alloc_from_iter(
+                            self.lower_attrs_vec(&e.attrs, e.span)
+                                .into_iter()
+                                .chain(old_attrs.iter().cloned()),
                         );
+                        if attrs.is_empty() {
+                            return ex;
+                        }
+
+                        self.attrs.insert(ex.hir_id.local_id, attrs);
                     }
                     return ex;
                 }
@@ -274,7 +276,7 @@ impl<'hir> LoweringContext<'_, 'hir> {
                 }
                 ExprKind::Assign(el, er, span) => self.lower_expr_assign(el, er, *span, e.span),
                 ExprKind::AssignOp(op, el, er) => hir::ExprKind::AssignOp(
-                    self.lower_binop(*op),
+                    self.lower_assign_op(*op),
                     self.lower_expr(el),
                     self.lower_expr(er),
                 ),
@@ -397,12 +399,16 @@ impl<'hir> LoweringContext<'_, 'hir> {
         &mut self,
         expr: &'hir hir::Expr<'hir>,
         span: Span,
-        check_ident: Ident,
-        check_hir_id: HirId,
+        cond_ident: Ident,
+        cond_hir_id: HirId,
     ) -> &'hir hir::Expr<'hir> {
-        let checker_fn = self.expr_ident(span, check_ident, check_hir_id);
-        let span = self.mark_span_with_reason(DesugaringKind::Contract, span, None);
-        self.expr_call(span, checker_fn, std::slice::from_ref(expr))
+        let cond_fn = self.expr_ident(span, cond_ident, cond_hir_id);
+        let call_expr = self.expr_call_lang_item_fn_mut(
+            span,
+            hir::LangItem::ContractCheckEnsures,
+            arena_vec![self; *cond_fn, *expr],
+        );
+        self.arena.alloc(call_expr)
     }
 
     pub(crate) fn lower_const_block(&mut self, c: &AnonConst) -> hir::ConstBlock {
@@ -441,6 +447,10 @@ impl<'hir> LoweringContext<'_, 'hir> {
 
     fn lower_binop(&mut self, b: BinOp) -> BinOp {
         Spanned { node: b.node, span: self.lower_span(b.span) }
+    }
+
+    fn lower_assign_op(&mut self, a: AssignOp) -> AssignOp {
+        Spanned { node: a.node, span: self.lower_span(a.span) }
     }
 
     fn lower_legacy_const_generics(

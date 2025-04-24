@@ -2,12 +2,10 @@
 #![allow(internal_features)]
 #![allow(rustc::diagnostic_outside_of_impl)]
 #![allow(rustc::untranslatable_diagnostic)]
-#![cfg_attr(doc, recursion_limit = "256")] // FIXME(nnethercote): will be removed by #124141
 #![doc(html_root_url = "https://doc.rust-lang.org/nightly/nightly-rustc/")]
 #![doc(rust_logo)]
 #![feature(assert_matches)]
 #![feature(box_patterns)]
-#![feature(debug_closure_helpers)]
 #![feature(file_buffered)]
 #![feature(if_let_guard)]
 #![feature(let_chains)]
@@ -34,7 +32,7 @@ use rustc_hir::CRATE_HIR_ID;
 use rustc_hir::def_id::CrateNum;
 use rustc_macros::{Decodable, Encodable, HashStable};
 use rustc_middle::dep_graph::WorkProduct;
-use rustc_middle::lint::LintLevelSource;
+use rustc_middle::lint::LevelAndSource;
 use rustc_middle::middle::debugger_visualizer::DebuggerVisualizerFile;
 use rustc_middle::middle::dependency_format::Dependencies;
 use rustc_middle::middle::exported_symbols::SymbolExportKind;
@@ -45,7 +43,6 @@ use rustc_serialize::{Decodable, Decoder, Encodable, Encoder};
 use rustc_session::Session;
 use rustc_session::config::{CrateType, OutputFilenames, OutputType, RUST_CGU_EXT};
 use rustc_session::cstore::{self, CrateSource};
-use rustc_session::lint::Level;
 use rustc_session::lint::builtin::LINKER_MESSAGES;
 use rustc_session::utils::NativeLibKind;
 use rustc_span::Symbol;
@@ -107,13 +104,19 @@ impl<M> ModuleCodegen<M> {
         emit_asm: bool,
         emit_ir: bool,
         outputs: &OutputFilenames,
+        invocation_temp: Option<&str>,
     ) -> CompiledModule {
-        let object = emit_obj.then(|| outputs.temp_path(OutputType::Object, Some(&self.name)));
-        let dwarf_object = emit_dwarf_obj.then(|| outputs.temp_path_dwo(Some(&self.name)));
-        let bytecode = emit_bc.then(|| outputs.temp_path(OutputType::Bitcode, Some(&self.name)));
-        let assembly = emit_asm.then(|| outputs.temp_path(OutputType::Assembly, Some(&self.name)));
-        let llvm_ir =
-            emit_ir.then(|| outputs.temp_path(OutputType::LlvmAssembly, Some(&self.name)));
+        let object = emit_obj
+            .then(|| outputs.temp_path_for_cgu(OutputType::Object, &self.name, invocation_temp));
+        let dwarf_object =
+            emit_dwarf_obj.then(|| outputs.temp_path_dwo_for_cgu(&self.name, invocation_temp));
+        let bytecode = emit_bc
+            .then(|| outputs.temp_path_for_cgu(OutputType::Bitcode, &self.name, invocation_temp));
+        let assembly = emit_asm
+            .then(|| outputs.temp_path_for_cgu(OutputType::Assembly, &self.name, invocation_temp));
+        let llvm_ir = emit_ir.then(|| {
+            outputs.temp_path_for_cgu(OutputType::LlvmAssembly, &self.name, invocation_temp)
+        });
 
         CompiledModule {
             name: self.name.clone(),
@@ -341,7 +344,7 @@ impl CodegenResults {
 /// Instead, encode exactly the information we need.
 #[derive(Copy, Clone, Debug, Encodable, Decodable)]
 pub struct CodegenLintLevels {
-    linker_messages: (Level, LintLevelSource),
+    linker_messages: LevelAndSource,
 }
 
 impl CodegenLintLevels {

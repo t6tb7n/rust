@@ -106,7 +106,7 @@ impl<'tcx> Interner for TyCtxt<'tcx> {
     ) -> Self::PredefinedOpaques {
         self.mk_predefined_opaques_in_body(data)
     }
-    type DefiningOpaqueTypes = &'tcx ty::List<LocalDefId>;
+    type LocalDefIds = &'tcx ty::List<LocalDefId>;
     type CanonicalVars = CanonicalVarInfos<'tcx>;
     fn mk_canonical_var_infos(self, infos: &[ty::CanonicalVarInfo<Self>]) -> Self::CanonicalVars {
         self.mk_canonical_var_infos(infos)
@@ -205,6 +205,9 @@ impl<'tcx> Interner for TyCtxt<'tcx> {
 
     fn type_of(self, def_id: DefId) -> ty::EarlyBinder<'tcx, Ty<'tcx>> {
         self.type_of(def_id)
+    }
+    fn type_of_opaque_hir_typeck(self, def_id: LocalDefId) -> ty::EarlyBinder<'tcx, Ty<'tcx>> {
+        self.type_of_opaque_hir_typeck(def_id)
     }
 
     type AdtDef = ty::AdtDef<'tcx>;
@@ -434,6 +437,10 @@ impl<'tcx> Interner for TyCtxt<'tcx> {
         )
     }
 
+    fn impl_self_is_guaranteed_unsized(self, impl_def_id: DefId) -> bool {
+        self.impl_self_is_guaranteed_unsized(impl_def_id)
+    }
+
     fn has_target_features(self, def_id: DefId) -> bool {
         !self.codegen_fn_attrs(def_id).target_features.is_empty()
     }
@@ -446,6 +453,10 @@ impl<'tcx> Interner for TyCtxt<'tcx> {
         self.is_lang_item(def_id, trait_lang_item_to_lang_item(lang_item))
     }
 
+    fn is_default_trait(self, def_id: DefId) -> bool {
+        self.is_default_trait(def_id)
+    }
+
     fn as_lang_item(self, def_id: DefId) -> Option<TraitSolverLangItem> {
         lang_item_to_trait_lang_item(self.lang_items().from_def_id(def_id)?)
     }
@@ -453,7 +464,7 @@ impl<'tcx> Interner for TyCtxt<'tcx> {
     fn associated_type_def_ids(self, def_id: DefId) -> impl IntoIterator<Item = DefId> {
         self.associated_items(def_id)
             .in_definition_order()
-            .filter(|assoc_item| matches!(assoc_item.kind, ty::AssocKind::Type))
+            .filter(|assoc_item| assoc_item.is_type())
             .map(|assoc_item| assoc_item.def_id)
     }
 
@@ -663,8 +674,23 @@ impl<'tcx> Interner for TyCtxt<'tcx> {
         self.anonymize_bound_vars(binder)
     }
 
-    fn opaque_types_defined_by(self, defining_anchor: LocalDefId) -> Self::DefiningOpaqueTypes {
+    fn opaque_types_defined_by(self, defining_anchor: LocalDefId) -> Self::LocalDefIds {
         self.opaque_types_defined_by(defining_anchor)
+    }
+
+    fn opaque_types_and_generators_defined_by(
+        self,
+        defining_anchor: Self::LocalDefId,
+    ) -> Self::LocalDefIds {
+        if self.next_trait_solver_globally() {
+            self.mk_local_def_ids_from_iter(
+                self.opaque_types_defined_by(defining_anchor)
+                    .iter()
+                    .chain(self.stalled_generators_within(defining_anchor)),
+            )
+        } else {
+            self.opaque_types_defined_by(defining_anchor)
+        }
     }
 }
 
@@ -859,7 +885,7 @@ impl<'tcx> CtxtInterners<'tcx> {
         Ty(Interned::new_unchecked(
             self.type_
                 .intern(kind, |kind| {
-                    let flags = super::flags::FlagComputation::for_kind(&kind);
+                    let flags = ty::FlagComputation::<TyCtxt<'tcx>>::for_kind(&kind);
                     let stable_hash = self.stable_hash(&flags, sess, untracked, &kind);
 
                     InternedInSet(self.arena.alloc(WithCachedTypeInfo {
@@ -885,7 +911,7 @@ impl<'tcx> CtxtInterners<'tcx> {
         Const(Interned::new_unchecked(
             self.const_
                 .intern(kind, |kind: ty::ConstKind<'_>| {
-                    let flags = super::flags::FlagComputation::for_const_kind(&kind);
+                    let flags = ty::FlagComputation::<TyCtxt<'tcx>>::for_const_kind(&kind);
                     let stable_hash = self.stable_hash(&flags, sess, untracked, &kind);
 
                     InternedInSet(self.arena.alloc(WithCachedTypeInfo {
@@ -901,7 +927,7 @@ impl<'tcx> CtxtInterners<'tcx> {
 
     fn stable_hash<'a, T: HashStable<StableHashingContext<'a>>>(
         &self,
-        flags: &ty::flags::FlagComputation,
+        flags: &ty::FlagComputation<TyCtxt<'tcx>>,
         sess: &'a Session,
         untracked: &'a Untracked,
         val: &T,
@@ -929,7 +955,7 @@ impl<'tcx> CtxtInterners<'tcx> {
         Predicate(Interned::new_unchecked(
             self.predicate
                 .intern(kind, |kind| {
-                    let flags = super::flags::FlagComputation::for_predicate(kind);
+                    let flags = ty::FlagComputation::<TyCtxt<'tcx>>::for_predicate(kind);
 
                     let stable_hash = self.stable_hash(&flags, sess, untracked, &kind);
 
@@ -950,7 +976,7 @@ impl<'tcx> CtxtInterners<'tcx> {
         } else {
             self.clauses
                 .intern_ref(clauses, || {
-                    let flags = super::flags::FlagComputation::for_clauses(clauses);
+                    let flags = ty::FlagComputation::<TyCtxt<'tcx>>::for_clauses(clauses);
 
                     InternedInSet(ListWithCachedTypeInfo::from_arena(
                         &*self.arena,
@@ -1539,6 +1565,25 @@ impl<'tcx> TyCtxt<'tcx> {
         self.reserve_and_set_memory_dedup(alloc, salt)
     }
 
+    pub fn default_traits(self) -> &'static [rustc_hir::LangItem] {
+        match self.sess.opts.unstable_opts.experimental_default_bounds {
+            true => &[
+                LangItem::Sized,
+                LangItem::DefaultTrait1,
+                LangItem::DefaultTrait2,
+                LangItem::DefaultTrait3,
+                LangItem::DefaultTrait4,
+            ],
+            false => &[LangItem::Sized],
+        }
+    }
+
+    pub fn is_default_trait(self, def_id: DefId) -> bool {
+        self.default_traits()
+            .iter()
+            .any(|&default_trait| self.lang_items().get(default_trait) == Some(def_id))
+    }
+
     /// Returns a range of the start/end indices specified with the
     /// `rustc_layout_scalar_valid_range` attribute.
     // FIXME(eddyb) this is an awkward spot for this method, maybe move it?
@@ -1781,10 +1826,15 @@ impl<'tcx> TyCtxt<'tcx> {
         // - needs_metadata: for putting into crate metadata.
         // - instrument_coverage: for putting into coverage data (see
         //   `hash_mir_source`).
+        // - metrics_dir: metrics use the strict version hash in the filenames
+        //   for dumped metrics files to prevent overwriting distinct metrics
+        //   for similar source builds (may change in the future, this is part
+        //   of the proof of concept impl for the metrics initiative project goal)
         cfg!(debug_assertions)
             || self.sess.opts.incremental.is_some()
             || self.needs_metadata()
             || self.sess.instrument_coverage()
+            || self.sess.opts.unstable_opts.metrics_dir.is_some()
     }
 
     #[inline]
@@ -1930,10 +1980,10 @@ impl<'tcx> TyCtxt<'tcx> {
         // As a consequence, this LocalDefId is always re-created before it is needed by the incr.
         // comp. engine itself.
         //
-        // This call also writes to the value of `source_span` and `expn_that_defined` queries.
+        // This call also writes to the value of the `source_span` query.
         // This is fine because:
-        // - those queries are `eval_always` so we won't miss their result changing;
-        // - this write will have happened before these queries are called.
+        // - that query is `eval_always` so we won't miss its result changing;
+        // - this write will have happened before that query is called.
         let def_id = self.untracked.definitions.write().create_def(parent, data);
 
         // This function modifies `self.definitions` using a side-effect.
@@ -2112,7 +2162,7 @@ impl<'tcx> TyCtxt<'tcx> {
             return vec![];
         };
 
-        let mut v = TraitObjectVisitor(vec![], self.hir());
+        let mut v = TraitObjectVisitor(vec![]);
         v.visit_ty_unambig(hir_output);
         v.0
     }
@@ -2125,7 +2175,7 @@ impl<'tcx> TyCtxt<'tcx> {
         scope_def_id: LocalDefId,
     ) -> Option<(Vec<&'tcx hir::Ty<'tcx>>, Span, Option<Span>)> {
         let hir_id = self.local_def_id_to_hir_id(scope_def_id);
-        let mut v = TraitObjectVisitor(vec![], self.hir());
+        let mut v = TraitObjectVisitor(vec![]);
         // when the return type is a type alias
         if let Some(hir::FnDecl { output: hir::FnRetTy::Return(hir_output), .. }) = self.hir_fn_decl_by_hir_id(hir_id)
             && let hir::TyKind::Path(hir::QPath::Resolved(
@@ -2871,11 +2921,11 @@ impl<'tcx> TyCtxt<'tcx> {
         self.interners.intern_clauses(clauses)
     }
 
-    pub fn mk_local_def_ids(self, clauses: &[LocalDefId]) -> &'tcx List<LocalDefId> {
+    pub fn mk_local_def_ids(self, def_ids: &[LocalDefId]) -> &'tcx List<LocalDefId> {
         // FIXME consider asking the input slice to be sorted to avoid
         // re-interning permutations, in which case that would be asserted
         // here.
-        self.intern_local_def_ids(clauses)
+        self.intern_local_def_ids(def_ids)
     }
 
     pub fn mk_local_def_ids_from_iter<I, T>(self, iter: I) -> T::Output
@@ -3022,8 +3072,8 @@ impl<'tcx> TyCtxt<'tcx> {
         span: impl Into<MultiSpan>,
         decorator: impl for<'a> LintDiagnostic<'a, ()>,
     ) {
-        let (level, src) = self.lint_level_at_node(lint, hir_id);
-        lint_level(self.sess, lint, level, src, Some(span.into()), |lint| {
+        let level = self.lint_level_at_node(lint, hir_id);
+        lint_level(self.sess, lint, level, Some(span.into()), |lint| {
             decorator.decorate_lint(lint);
         })
     }
@@ -3040,8 +3090,8 @@ impl<'tcx> TyCtxt<'tcx> {
         span: impl Into<MultiSpan>,
         decorate: impl for<'a, 'b> FnOnce(&'b mut Diag<'a, ()>),
     ) {
-        let (level, src) = self.lint_level_at_node(lint, hir_id);
-        lint_level(self.sess, lint, level, src, Some(span.into()), decorate);
+        let level = self.lint_level_at_node(lint, hir_id);
+        lint_level(self.sess, lint, level, Some(span.into()), decorate);
     }
 
     /// Find the crate root and the appropriate span where `use` and outer attributes can be
@@ -3108,8 +3158,8 @@ impl<'tcx> TyCtxt<'tcx> {
         id: HirId,
         decorate: impl for<'a, 'b> FnOnce(&'b mut Diag<'a, ()>),
     ) {
-        let (level, src) = self.lint_level_at_node(lint, id);
-        lint_level(self.sess, lint, level, src, None, decorate);
+        let level = self.lint_level_at_node(lint, id);
+        lint_level(self.sess, lint, level, None, decorate);
     }
 
     pub fn in_scope_traits(self, id: HirId) -> Option<&'tcx [TraitCandidate]> {
@@ -3246,6 +3296,11 @@ impl<'tcx> TyCtxt<'tcx> {
 
     pub fn next_trait_solver_in_coherence(self) -> bool {
         self.sess.opts.unstable_opts.next_solver.coherence
+    }
+
+    #[allow(rustc::bad_opt_access)]
+    pub fn use_typing_mode_borrowck(self) -> bool {
+        self.next_trait_solver_globally() || self.sess.opts.unstable_opts.typing_mode_borrowck
     }
 
     pub fn is_impl_trait_in_trait(self, def_id: DefId) -> bool {

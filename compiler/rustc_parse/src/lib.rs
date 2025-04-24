@@ -4,7 +4,6 @@
 #![allow(internal_features)]
 #![allow(rustc::diagnostic_outside_of_impl)]
 #![allow(rustc::untranslatable_diagnostic)]
-#![cfg_attr(doc, recursion_limit = "256")] // FIXME(nnethercote): will be removed by #124141
 #![feature(array_windows)]
 #![feature(assert_matches)]
 #![feature(box_patterns)]
@@ -33,7 +32,7 @@ pub const MACRO_ARGUMENTS: Option<&str> = Some("macro arguments");
 
 #[macro_use]
 pub mod parser;
-use parser::{Parser, make_unclosed_delims_error};
+use parser::Parser;
 pub mod lexer;
 pub mod validate_attr;
 

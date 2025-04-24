@@ -286,18 +286,23 @@ where
             // fixing it may cause inference breakage or introduce ambiguity.
             GoalSource::Misc => PathKind::Unknown,
             GoalSource::NormalizeGoal(path_kind) => path_kind,
-            GoalSource::ImplWhereBound => {
+            GoalSource::ImplWhereBound => match self.current_goal_kind {
                 // We currently only consider a cycle coinductive if it steps
                 // into a where-clause of a coinductive trait.
+                CurrentGoalKind::CoinductiveTrait => PathKind::Coinductive,
+                // While normalizing via an impl does step into a where-clause of
+                // an impl, accessing the associated item immediately steps out of
+                // it again. This means cycles/recursive calls are not guarded
+                // by impls used for normalization.
                 //
+                // See tests/ui/traits/next-solver/cycles/normalizes-to-is-not-productive.rs
+                // for how this can go wrong.
+                CurrentGoalKind::NormalizesTo => PathKind::Inductive,
                 // We probably want to make all traits coinductive in the future,
-                // so we treat cycles involving their where-clauses as ambiguous.
-                if let CurrentGoalKind::CoinductiveTrait = self.current_goal_kind {
-                    PathKind::Coinductive
-                } else {
-                    PathKind::Unknown
-                }
-            }
+                // so we treat cycles involving where-clauses of not-yet coinductive
+                // traits as ambiguous for now.
+                CurrentGoalKind::Misc => PathKind::Unknown,
+            },
             // Relating types is always unproductive. If we were to map proof trees to
             // corecursive functions as explained in #136824, relating types never
             // introduces a constructor which could cause the recursion to be guarded.
@@ -387,7 +392,8 @@ where
         };
 
         for &(key, ty) in &input.predefined_opaques_in_body.opaque_types {
-            ecx.delegate.inject_new_hidden_type_unchecked(key, ty, ecx.origin_span);
+            let prev = ecx.delegate.register_hidden_type_in_storage(key, ty, ecx.origin_span);
+            assert_eq!(prev, None);
         }
 
         if !ecx.nested_goals.is_empty() {
@@ -1070,16 +1076,12 @@ where
         self.delegate.fetch_eligible_assoc_item(goal_trait_ref, trait_assoc_def_id, impl_def_id)
     }
 
-    pub(super) fn insert_hidden_type(
+    pub(super) fn register_hidden_type_in_storage(
         &mut self,
         opaque_type_key: ty::OpaqueTypeKey<I>,
-        param_env: I::ParamEnv,
         hidden_ty: I::Ty,
-    ) -> Result<(), NoSolution> {
-        let mut goals = Vec::new();
-        self.delegate.insert_hidden_type(opaque_type_key, param_env, hidden_ty, &mut goals)?;
-        self.add_goals(GoalSource::Misc, goals);
-        Ok(())
+    ) -> Option<I::Ty> {
+        self.delegate.register_hidden_type_in_storage(opaque_type_key, hidden_ty, self.origin_span)
     }
 
     pub(super) fn add_item_bounds_for_hidden_type(

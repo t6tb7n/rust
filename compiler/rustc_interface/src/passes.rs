@@ -800,6 +800,7 @@ pub fn create_and_enter_global_ctxt<T, F: for<'tcx> FnOnce(TyCtxt<'tcx>) -> T>(
         sess.opts.cg.metadata.clone(),
         sess.cfg_version,
     );
+
     let outputs = util::build_output_filenames(&pre_configured_attrs, sess);
 
     let dep_type = DepsType { dep_names: rustc_query_impl::dep_kind_names() };
@@ -955,7 +956,9 @@ fn run_required_analyses(tcx: TyCtxt<'_>) {
             // Run unsafety check because it's responsible for stealing and
             // deallocating THIR.
             tcx.ensure_ok().check_unsafety(def_id);
-            tcx.ensure_ok().mir_borrowck(def_id)
+            if !tcx.is_typeck_child(def_id.to_def_id()) {
+                tcx.ensure_ok().mir_borrowck(def_id)
+            }
         });
     });
     sess.time("MIR_effect_checking", || {
@@ -976,7 +979,7 @@ fn run_required_analyses(tcx: TyCtxt<'_>) {
         tcx.par_hir_body_owners(|def_id| {
             if tcx.is_coroutine(def_id.to_def_id()) {
                 tcx.ensure_ok().mir_coroutine_witnesses(def_id);
-                tcx.ensure_ok().check_coroutine_obligations(
+                let _ = tcx.ensure_ok().check_coroutine_obligations(
                     tcx.typeck_root_def_id(def_id.to_def_id()).expect_local(),
                 );
                 // Eagerly check the unsubstituted layout for cycles.

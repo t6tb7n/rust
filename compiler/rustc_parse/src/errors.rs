@@ -7,8 +7,7 @@ use rustc_ast::util::parser::ExprPrecedence;
 use rustc_ast::{Path, Visibility};
 use rustc_errors::codes::*;
 use rustc_errors::{
-    Applicability, Diag, DiagCtxtHandle, Diagnostic, EmissionGuarantee, Level, SubdiagMessageOp,
-    Subdiagnostic,
+    Applicability, Diag, DiagCtxtHandle, Diagnostic, EmissionGuarantee, Level, Subdiagnostic,
 };
 use rustc_macros::{Diagnostic, Subdiagnostic};
 use rustc_session::errors::ExprParenthesesNeeded;
@@ -30,7 +29,6 @@ pub(crate) struct AmbiguousPlus {
 #[derive(Diagnostic)]
 #[diag(parse_maybe_recover_from_bad_type_plus, code = E0178)]
 pub(crate) struct BadTypePlus {
-    pub ty: String,
     #[primary_span]
     pub span: Span,
     #[subdiagnostic]
@@ -810,16 +808,16 @@ pub(crate) enum WrapInParentheses {
 
 #[derive(Diagnostic)]
 #[diag(parse_array_brackets_instead_of_braces)]
-pub(crate) struct ArrayBracketsInsteadOfSpaces {
+pub(crate) struct ArrayBracketsInsteadOfBraces {
     #[primary_span]
     pub span: Span,
     #[subdiagnostic]
-    pub sub: ArrayBracketsInsteadOfSpacesSugg,
+    pub sub: ArrayBracketsInsteadOfBracesSugg,
 }
 
 #[derive(Subdiagnostic)]
 #[multipart_suggestion(parse_suggestion, applicability = "maybe-incorrect")]
-pub(crate) struct ArrayBracketsInsteadOfSpacesSugg {
+pub(crate) struct ArrayBracketsInsteadOfBracesSugg {
     #[suggestion_part(code = "[")]
     pub left: Span,
     #[suggestion_part(code = "]")]
@@ -1551,11 +1549,7 @@ pub(crate) struct FnTraitMissingParen {
 }
 
 impl Subdiagnostic for FnTraitMissingParen {
-    fn add_to_diag_with<G: EmissionGuarantee, F: SubdiagMessageOp<G>>(
-        self,
-        diag: &mut Diag<'_, G>,
-        _: &F,
-    ) {
+    fn add_to_diag<G: EmissionGuarantee>(self, diag: &mut Diag<'_, G>) {
         diag.span_label(self.span, crate::fluent_generated::parse_fn_trait_missing_paren);
         diag.span_suggestion_short(
             self.span.shrink_to_hi(),
@@ -1598,9 +1592,6 @@ pub(crate) struct PathSingleColon {
 
     #[suggestion(applicability = "machine-applicable", code = ":", style = "verbose")]
     pub suggestion: Span,
-
-    #[note(parse_type_ascription_removed)]
-    pub type_ascription: bool,
 }
 
 #[derive(Diagnostic)]
@@ -1617,9 +1608,6 @@ pub(crate) struct ColonAsSemi {
     #[primary_span]
     #[suggestion(applicability = "machine-applicable", code = ";", style = "verbose")]
     pub span: Span,
-
-    #[note(parse_type_ascription_removed)]
-    pub type_ascription: bool,
 }
 
 #[derive(Diagnostic)]
@@ -1696,10 +1684,10 @@ pub(crate) struct SelfArgumentPointer {
 
 #[derive(Diagnostic)]
 #[diag(parse_unexpected_token_after_dot)]
-pub(crate) struct UnexpectedTokenAfterDot<'a> {
+pub(crate) struct UnexpectedTokenAfterDot {
     #[primary_span]
     pub span: Span,
-    pub actual: Cow<'a, str>,
+    pub actual: String,
 }
 
 #[derive(Diagnostic)]
@@ -2152,6 +2140,13 @@ pub(crate) enum UnknownPrefixSugg {
         style = "verbose"
     )]
     UseBr(#[primary_span] Span),
+    #[suggestion(
+        parse_suggestion_cr,
+        code = "cr",
+        applicability = "maybe-incorrect",
+        style = "verbose"
+    )]
+    UseCr(#[primary_span] Span),
     #[suggestion(
         parse_suggestion_whitespace,
         code = " ",
@@ -2769,17 +2764,6 @@ pub(crate) enum UnexpectedExpressionInPatternSugg {
         /// The statement's block's indentation.
         indentation: String,
     },
-
-    #[multipart_suggestion(
-        parse_unexpected_expr_in_pat_inline_const_sugg,
-        applicability = "maybe-incorrect"
-    )]
-    InlineConst {
-        #[suggestion_part(code = "const {{ ")]
-        start_span: Span,
-        #[suggestion_part(code = " }}")]
-        end_span: Span,
-    },
 }
 
 #[derive(Diagnostic)]
@@ -2817,6 +2801,8 @@ pub(crate) struct ReturnTypesUseThinArrow {
 pub(crate) struct NeedPlusAfterTraitObjectLifetime {
     #[primary_span]
     pub span: Span,
+    #[suggestion(code = " + /* Trait */", applicability = "has-placeholders")]
+    pub suggestion: Span,
 }
 
 #[derive(Diagnostic)]
