@@ -95,7 +95,7 @@ checksum = "8cff88b751e7a276c4ab0e222c3f355190adc6dde9ce39c851db39da34990df7"
 dependencies = [
  "cfg-if",
  "compiler_builtins",
- "libc",
+ "libc 0.2.172 (registry+https://github.com/rust-lang/crates.io-index)",
  "rustc-std-workspace-core",
  "windows-sys",
 ]
@@ -165,6 +165,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "libc"
+version = "0.2.172"
+source = "git+https://github.com/t6tb7n/libc.git?branch=qnx_iosock#1971104f8ad2a8e77d55bd2a5a067cc2ec776d5d"
+dependencies = [
+ "rustc-std-workspace-core",
+]
+
+[[package]]
 name = "memchr"
 version = "2.7.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -206,7 +214,7 @@ dependencies = [
  "cfg-if",
  "compiler_builtins",
  "core",
- "libc",
+ "libc 0.2.172 (registry+https://github.com/rust-lang/crates.io-index)",
 ]
 
 [[package]]
@@ -217,7 +225,7 @@ dependencies = [
  "cfg-if",
  "compiler_builtins",
  "core",
- "libc",
+ "libc 0.2.172 (registry+https://github.com/rust-lang/crates.io-index)",
  "unwind",
 ]
 
@@ -360,7 +368,7 @@ dependencies = [
  "fortanix-sgx-abi",
  "hashbrown",
  "hermit-abi",
- "libc",
+ "libc 0.2.172 (git+https://github.com/t6tb7n/libc.git?branch=qnx_iosock)",
  "miniz_oxide",
  "object",
  "panic_abort",
@@ -382,7 +390,7 @@ version = "0.1.5"
 dependencies = [
  "cfg-if",
  "compiler_builtins",
- "libc",
+ "libc 0.2.172 (registry+https://github.com/rust-lang/crates.io-index)",
  "rustc-std-workspace-alloc",
  "rustc-std-workspace-core",
 ]
@@ -414,7 +422,7 @@ version = "0.0.0"
 dependencies = [
  "core",
  "getopts",
- "libc",
+ "libc 0.2.172 (registry+https://github.com/rust-lang/crates.io-index)",
  "std",
 ]
 
@@ -442,7 +450,7 @@ dependencies = [
  "cfg-if",
  "compiler_builtins",
  "core",
- "libc",
+ "libc 0.2.172 (registry+https://github.com/rust-lang/crates.io-index)",
  "unwinding",
 ]
 
